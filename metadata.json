@@ -1,5 +1,5 @@
 {
   "student_id": "01903",
   "model_used": "gpt-4o-mini",
-  "architecture": "Tool-calling Multi-Agent without hardcoded rules"
+  "architecture": "Multi-Agent with OpenRouter API"
 }
