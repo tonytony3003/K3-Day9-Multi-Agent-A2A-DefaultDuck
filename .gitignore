@@ -8,5 +8,4 @@ __pycache__/
 htmlcov/
 output/
 output/*.tmp
-output.zip
 submission_candidates/
