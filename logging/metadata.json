@@ -1,42 +1,42 @@
 {
-  "model": "llama-3.1-8b-instant",
-  "model_parameter_size": "8B",
-  "framework": "python-stdlib + groq-rest-api",
+  "project": "K3 Day 09 Multi-Agent E-commerce Dispute Resolution",
+  "run_id": "run_2c48467684694bafb3560832fc688351",
+  "model": "openai/gpt-4o-mini",
+  "model_provider": "OpenRouter",
+  "parameter_size": "approved for this assignment",
+  "framework": "LangGraph 1.0.10",
+  "structured_output": "OpenRouter JSON Schema strict mode",
+  "execution_mode": "deterministic",
   "runtime": {
-    "python_version": "3.13.5",
-    "os": "win32",
-    "data_load_time_seconds": 1.02,
-    "processing_time_seconds": 1472.44,
-    "total_llm_calls": 80,
-    "total_tokens_used": 98730
+    "language": "Python",
+    "python_version": "3.12.10",
+    "execution": "single process with parallel specialist graph branches"
   },
-  "agents": [
-    {
-      "name": "CoordinatorAgent",
-      "role": "Orchestration and case dispatch"
-    },
-    {
-      "name": "OrderAgent",
-      "role": "Order data retrieval + LLM analysis"
-    },
-    {
-      "name": "DeliveryAgent",
-      "role": "LLM-powered delivery timeliness analysis"
-    },
-    {
-      "name": "PaymentAgent",
-      "role": "Payment data retrieval + LLM reconciliation"
-    },
-    {
-      "name": "PolicyAgent",
-      "role": "LLM-powered EC_POLICY_V1 rule application"
-    },
-    {
-      "name": "VerifierAgent",
-      "role": "LLM-powered schema validation + output writing"
-    }
-  ],
   "policy_version": "EC_POLICY_V1",
-  "api_provider": "Groq",
-  "generated_at": "2026-08-05T05:23:04.064651+00:00"
+  "agent_count": 6,
+  "agents": [
+    "coordinator",
+    "order_seller_agent",
+    "payment_agent",
+    "delivery_agent",
+    "policy_agent",
+    "verifier_agent"
+  ],
+  "data_snapshot": "Olist CSVs provided in repository",
+  "audit": {
+    "passed": true,
+    "errors": [],
+    "input_count": 50,
+    "output_count": 50,
+    "issue_distribution": {
+      "canceled_order_paid": 8,
+      "late_delivery_logistics": 8,
+      "late_delivery_seller": 8,
+      "unavailable_order_paid": 8,
+      "unsupported_late_claim": 9,
+      "valid_split_payment": 9
+    },
+    "total_refund_brl": "3429.64"
+  },
+  "generated_at": "2026-08-05T11:43:24+07:00"
 }

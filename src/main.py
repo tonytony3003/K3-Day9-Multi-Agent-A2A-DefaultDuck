@@ -1,188 +1,216 @@
-"""
-Main Entry Point
-=================
-Loads .env for API key, initializes Groq LLM client, then processes
-all 50 cases through the multi-agent pipeline using llama-3.1-8b-instant.
-Writes trace.jsonl immediately per case so audit logs stay live.
-"""
+from __future__ import annotations
 
+import argparse
 import json
-import os
+import platform
 import sys
-import time
-import datetime
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
-# Add src to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dotenv import dotenv_values
+from tqdm import tqdm
 
-from data_loader import OlistData
-from llm_client import GroqLLMClient, MODEL_NAME
-from agents.coordinator_agent import CoordinatorAgent
-
-
-def load_env(env_path: str) -> dict[str, str]:
-    """Load .env file into a dict (simple parser, no pip install needed)."""
-    env_vars: dict[str, str] = {}
-    if not os.path.exists(env_path):
-        return env_vars
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, value = line.split("=", 1)
-                env_vars[key.strip()] = value.strip()
-    return env_vars
+from .data_catalog import DataCatalog
+from .graph import build_graph
+from .llm_client import MODEL_ID, OpenRouterClient
+from .models import InputCase
+from .trace_logger import TraceLogger
+from .validation import atomic_write_json, audit_submission
 
 
-def main():
-    sys.stdout.reconfigure(encoding="utf-8")
+ROOT = Path(__file__).resolve().parents[1]
 
-    # --- Resolve paths ---
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(project_root, "data")
-    input_dir = os.path.join(project_root, "input")
-    output_dir = os.path.join(project_root, "output")
-    logging_dir = os.path.join(project_root, "logging")
-    env_path = os.path.join(project_root, ".env")
 
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(logging_dir, exist_ok=True)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the K3 Day 9 multi-agent dispute resolution pipeline."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("deterministic", "llm"),
+        default="deterministic",
+        help="Use OpenRouter agents only when explicitly selecting llm mode.",
+    )
+    parser.add_argument(
+        "--case",
+        help="Run one case ID such as EC_001. Omit to run and audit all 50 cases.",
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the tqdm progress bar (useful for CI or redirected logs).",
+    )
+    return parser.parse_args()
 
-    # --- Load .env ---
-    print("=" * 60, flush=True)
-    print("Multi-Agent E-commerce Dispute Resolution System", flush=True)
-    print(f"Model: {MODEL_NAME} (via Groq API)", flush=True)
-    print("=" * 60, flush=True)
 
-    env_vars = load_env(env_path)
-    api_key = env_vars.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+def load_cases(case_filter: str | None) -> list[tuple[Path, InputCase]]:
+    paths = sorted((ROOT / "input").glob("EC_*.json"))
+    cases = [
+        (path, InputCase.model_validate_json(path.read_text(encoding="utf-8")))
+        for path in paths
+    ]
+    if case_filter:
+        cases = [(path, case) for path, case in cases if case.case_id == case_filter]
+        if not cases:
+            raise ValueError(f"Input case not found: {case_filter}")
+    elif len(cases) != 50:
+        raise ValueError(f"Expected exactly 50 input cases, found {len(cases)}")
+    return cases
 
-    # --- Initialize LLM client ---
-    print("\n[1/4] Initializing Groq LLM client...", flush=True)
-    llm = GroqLLMClient(api_key)
-    print(f"  → Model: {llm.model}", flush=True)
-    print(f"  → API: Groq REST API", flush=True)
 
-    # --- Load data ---
-    print("\n[2/4] Loading Olist dataset...", flush=True)
-    t0 = time.time()
-    data = OlistData(data_dir)
-    load_time = time.time() - t0
-    print(f"  → Loaded in {load_time:.2f}s", flush=True)
-    print(f"  → Orders: {len(data.orders):,}", flush=True)
-    print(f"  → Order items: {sum(len(v) for v in data.order_items.values()):,}", flush=True)
-    print(f"  → Payments: {sum(len(v) for v in data.order_payments.values()):,}", flush=True)
-    print(f"  → Sellers: {len(data.sellers):,}", flush=True)
-
-    # --- Initialize coordinator ---
-    coordinator = CoordinatorAgent(data, llm, output_dir)
-
-    # --- Process all cases ---
-    print(f"\n[3/4] Processing cases from {input_dir}...", flush=True)
-    case_files = sorted([
-        f for f in os.listdir(input_dir)
-        if f.startswith("EC_") and f.endswith(".json")
-    ])
-    print(f"  → Found {len(case_files)} cases", flush=True)
-
-    trace_path = os.path.join(logging_dir, "trace.jsonl")
-    trace_file = open(trace_path, "w", encoding="utf-8")
-
-    all_traces: list[dict] = []
-    results_summary: list[dict] = []
-    t_start = time.time()
-
-    for i, case_file in enumerate(case_files, 1):
-        filepath = os.path.join(input_dir, case_file)
-        with open(filepath, encoding="utf-8") as f:
-            case = json.load(f)
-
-        case_t0 = time.time()
-        output, trace_entries = coordinator.process_case(case)
-        case_time = time.time() - case_t0
-
-        # Append and flush trace immediately
-        for entry in trace_entries:
-            trace_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        trace_file.flush()
-
-        all_traces.extend(trace_entries)
-
-        issue = output["assessment"]["primary_issue"]
-        status = output["assessment"]["case_status"]
-        refund = output["financial_resolution"]["recommended_refund_brl"]
-        print(
-            f"  [{i:2d}/50] {case['case_id']} → {issue:<28s} | {status:<16s} "
-            f"| refund={refund:.2f} BRL | {case_time:.1f}s",
-            flush=True,
-        )
-
-        results_summary.append({
-            "case_id": case["case_id"],
-            "primary_issue": issue,
-            "case_status": status,
-            "refund": refund,
-        })
-
-    trace_file.close()
-
-    total_time = time.time() - t_start
-    print(f"\n  → All {len(case_files)} cases processed in {total_time:.1f}s", flush=True)
-    print(f"  → Total LLM calls: {llm.total_calls}", flush=True)
-    print(f"  → Total tokens used: {llm.total_tokens:,}", flush=True)
-
-    # --- Write metadata.json ---
-    print(f"\n[4/4] Writing metadata file...", flush=True)
+def write_metadata(mode: str, run_id: str, audit: dict | None) -> None:
     metadata = {
-        "model": MODEL_NAME,
-        "model_parameter_size": "8B",
-        "framework": "python-stdlib + groq-rest-api",
+        "project": "K3 Day 09 Multi-Agent E-commerce Dispute Resolution",
+        "run_id": run_id,
+        "model": MODEL_ID,
+        "model_provider": "OpenRouter",
+        "parameter_size": "approved for this assignment",
+        "framework": "LangGraph 1.0.10",
+        "structured_output": "OpenRouter JSON Schema strict mode",
+        "execution_mode": mode,
         "runtime": {
-            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "os": sys.platform,
-            "data_load_time_seconds": round(load_time, 2),
-            "processing_time_seconds": round(total_time, 2),
-            "total_llm_calls": llm.total_calls,
-            "total_tokens_used": llm.total_tokens,
+            "language": "Python",
+            "python_version": platform.python_version(),
+            "execution": "single process with parallel specialist graph branches",
         },
-        "agents": [
-            {"name": "CoordinatorAgent", "role": "Orchestration and case dispatch"},
-            {"name": "OrderAgent", "role": "Order data retrieval + LLM analysis"},
-            {"name": "DeliveryAgent", "role": "LLM-powered delivery timeliness analysis"},
-            {"name": "PaymentAgent", "role": "Payment data retrieval + LLM reconciliation"},
-            {"name": "PolicyAgent", "role": "LLM-powered EC_POLICY_V1 rule application"},
-            {"name": "VerifierAgent", "role": "LLM-powered schema validation + output writing"},
-        ],
         "policy_version": "EC_POLICY_V1",
-        "api_provider": "Groq",
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "agent_count": 6,
+        "agents": [
+            "coordinator",
+            "order_seller_agent",
+            "payment_agent",
+            "delivery_agent",
+            "policy_agent",
+            "verifier_agent",
+        ],
+        "data_snapshot": "Olist CSVs provided in repository",
+        "audit": audit,
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
-    metadata_path = os.path.join(logging_dir, "metadata.json")
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
-    print(f"  → metadata.json: written", flush=True)
+    atomic_write_json(ROOT / "logging" / "metadata.json", metadata)
 
-    # --- Summary ---
-    print("\n" + "=" * 60, flush=True)
-    print("SUMMARY", flush=True)
-    print("=" * 60, flush=True)
 
-    from collections import Counter
-    issue_counts = Counter(r["primary_issue"] for r in results_summary)
-    for issue, count in sorted(issue_counts.items()):
-        print(f"  {issue:<30s}: {count:3d} cases", flush=True)
+def main() -> int:
+    args = parse_args()
+    cases = load_cases(args.case)
+    config = dotenv_values(ROOT / ".env")
+    client = None
+    key_preflight = None
+    if args.mode == "llm":
+        client = OpenRouterClient(
+            api_key=config.get("OPENROUTER_API_KEY") or "",
+            configured_model=config.get("OPENROUTER_MODEL") or "",
+        )
+        print("Checking OpenRouter API key...", flush=True)
+        key_preflight = client.preflight()
+        print("OpenRouter API key: valid", flush=True)
 
-    total_refund = sum(r["refund"] for r in results_summary)
-    action_count = sum(1 for r in results_summary if r["case_status"] == "action_required")
-    print(f"\n  Total refund recommended: {total_refund:.2f} BRL", flush=True)
-    print(f"  Cases requiring action:   {action_count}/{len(results_summary)}", flush=True)
-    print(f"  Cases no action:          {len(results_summary) - action_count}/{len(results_summary)}", flush=True)
-    print(f"  Total LLM calls:          {llm.total_calls}", flush=True)
-    print(f"  Total tokens:             {llm.total_tokens:,}", flush=True)
-    print("=" * 60, flush=True)
+    catalog = DataCatalog(ROOT / "data")
+    for _, case in cases:
+        if case.customer_request.claimed_order_id not in catalog.orders:
+            raise ValueError(
+                f"{case.case_id}: claimed order does not exist in source data"
+            )
+
+    run_id = f"run_{uuid4().hex}"
+    tracer = TraceLogger(ROOT / "logging" / "trace.jsonl", run_id)
+    tracer.event(
+        "run_started",
+        payload={
+            "mode": args.mode,
+            "case_count": len(cases),
+            "key_preflight": key_preflight,
+        },
+        summary={"case_count": len(cases), "mode": args.mode},
+        model=MODEL_ID if args.mode == "llm" else None,
+    )
+    tracer.event(
+        "data_preflight_completed",
+        payload={"orders_loaded": len(catalog.orders)},
+        summary={"input_count": len(cases), "all_orders_found": True},
+    )
+
+    graph = build_graph(catalog, tracer, args.mode, client)
+    issues: Counter[str] = Counter()
+    progress = tqdm(
+        cases,
+        desc=f"Processing ({args.mode})",
+        unit="case",
+        dynamic_ncols=True,
+        disable=args.no_progress,
+    )
+    for input_path, case in progress:
+        progress.set_postfix_str(case.case_id, refresh=False)
+        tracer.event(
+            "case_started",
+            case_id=case.case_id,
+            payload=case.model_dump(mode="json"),
+            summary={"claimed_order_id": case.customer_request.claimed_order_id},
+        )
+        try:
+            result = graph.invoke({"case": case})
+            errors = result.get("errors", [])
+            if errors or "verified_output" not in result:
+                raise RuntimeError("; ".join(errors) or "Verifier did not return output")
+            output = result["verified_output"]
+            atomic_write_json(
+                ROOT / "output" / input_path.name, output.model_dump(mode="json")
+            )
+            issues[output.assessment.primary_issue] += 1
+            tracer.event(
+                "output_written",
+                case_id=case.case_id,
+                payload={"filename": input_path.name},
+                summary={"primary_issue": output.assessment.primary_issue},
+                evidence_ids=output.evidence_ids,
+            )
+            tracer.event(
+                "case_completed",
+                case_id=case.case_id,
+                summary={"status": "verified"},
+            )
+        except Exception as exc:
+            tracer.event(
+                "case_completed",
+                case_id=case.case_id,
+                status="error",
+                summary={"status": "failed"},
+                error=str(exc),
+            )
+            write_metadata(args.mode, run_id, None)
+            raise
+
+    audit = None
+    if not args.case:
+        audit = audit_submission(ROOT / "input", ROOT / "output", catalog)
+        if not audit["passed"]:
+            raise RuntimeError("Submission audit failed: " + "; ".join(audit["errors"]))
+    tracer.event(
+        "run_completed",
+        payload=audit or {"case": args.case},
+        summary={
+            "status": "passed",
+            "issue_distribution": dict(sorted(issues.items())),
+        },
+    )
+    write_metadata(args.mode, run_id, audit)
+    print(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "mode": args.mode,
+                "processed": len(cases),
+                "issues": dict(sorted(issues.items())),
+                "audit": audit,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
