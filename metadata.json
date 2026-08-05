@@ -1,0 +1,6 @@
+{
+  "model": "gpt-4o-mini",
+  "parameter_size": "8B",
+  "framework": "OpenAI Python SDK (Structured Outputs)",
+  "runtime": "Python 3"
+}
