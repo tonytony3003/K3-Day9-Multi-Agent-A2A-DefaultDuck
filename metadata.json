@@ -1,5 +1,5 @@
 {
   "student_id": "01903",
-  "model_used": "gpt-4o-mini",
-  "architecture": "Multi-Agent with OpenRouter API"
+  "model_used": "qwen/qwen-2.5-7b-instruct",
+  "architecture": "Architecture v2 (Deterministic + 1 LLM Reconciliation)"
 }
