@@ -1,0 +1,49 @@
+{
+  "framework": "Custom Python Multi-Agent (no LLM framework dependency)",
+  "agents": [
+    {
+      "name": "CoordinatorAgent",
+      "role": "Orchestrates the pipeline, assembles final output",
+      "model": null,
+      "parameter_size": null
+    },
+    {
+      "name": "OrderSellerAgent",
+      "role": "Retrieves order status, items, seller handoff timing",
+      "model": null,
+      "parameter_size": null
+    },
+    {
+      "name": "PaymentAgent",
+      "role": "Retrieves payment rows, computes totals, detects split payments",
+      "model": null,
+      "parameter_size": null
+    },
+    {
+      "name": "DeliveryAgent",
+      "role": "Compares delivery dates, determines if delivery was late",
+      "model": null,
+      "parameter_size": null
+    },
+    {
+      "name": "PolicyAgent",
+      "role": "Applies EC_POLICY_V1 business rules, determines primary_issue and refund",
+      "model": null,
+      "parameter_size": null
+    },
+    {
+      "name": "VerifierAgent",
+      "role": "Validates output schema, evidence IDs, array limits, and financials",
+      "model": null,
+      "parameter_size": null
+    }
+  ],
+  "runtime": {
+    "language": "Python 3.11+",
+    "dependencies": ["pandas>=1.5.0", "python-dotenv>=1.0.0"],
+    "policy_version": "EC_POLICY_V1",
+    "dataset": "Olist Brazilian E-Commerce Public Dataset",
+    "approach": "Deterministic rule-based multi-agent pipeline. No LLM calls needed as business rules are fully deterministic from CSV data.",
+    "note": "Each agent class has a single responsibility and passes structured data (handoff) to the next agent. All agents operate within the 10B parameter limit constraint (no generative models used)."
+  }
+}
