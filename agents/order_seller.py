@@ -102,7 +102,7 @@ class OrderSellerAgent:
 
         result["item_total_brl"] = round(item_total, 2)
         result["freight_total_brl"] = round(freight_total, 2)
-        result["seller_ids"] = list(seller_ids)
-        result["late_seller_ids"] = list(late_seller_ids)
+        result["seller_ids"] = sorted(list(seller_ids))
+        result["late_seller_ids"] = sorted(list(late_seller_ids))
 
         return result

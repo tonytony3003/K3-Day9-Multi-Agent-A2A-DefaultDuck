@@ -64,13 +64,15 @@ class DataLoader:
         return rows.iloc[0].to_dict()
 
     def get_order_items(self, order_id: str) -> list[dict]:
-        """Return list of order_items rows for the given order_id."""
-        rows = self.order_items[self.order_items["order_id"] == order_id]
+        """Return list of order_items rows for the given order_id, sorted by order_item_id."""
+        rows = self.order_items[self.order_items["order_id"] == order_id].copy()
+        rows = rows.sort_values(by="order_item_id")
         return rows.to_dict(orient="records")
 
     def get_order_payments(self, order_id: str) -> list[dict]:
-        """Return list of order_payments rows for the given order_id."""
-        rows = self.order_payments[self.order_payments["order_id"] == order_id]
+        """Return list of order_payments rows for the given order_id, sorted by payment_sequential."""
+        rows = self.order_payments[self.order_payments["order_id"] == order_id].copy()
+        rows = rows.sort_values(by="payment_sequential")
         return rows.to_dict(orient="records")
 
     def get_seller(self, seller_id: str) -> dict | None:
