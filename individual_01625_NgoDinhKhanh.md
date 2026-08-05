@@ -45,7 +45,7 @@ Tự động điều tra và giải quyết 50 khiếu nại thương mại đi�
 
 ### Cách triển khai
 
-1. **Data Layer (`data_loader.py`):** Đọc dữ liệu CSV vào bộ nhớ bằng Python `csv.DictReader` cho phép truy vấn $O(1)$ theo `order_id`.
+1. **Data Layer (`data_loader.py`):** Đọc dữ liệu CSV vào bộ nhớ bằng Python `csv.DictReader` cho phép truy vấn O(1) theo `order_id`.
 2. **LLM Client Layer (`llm_client.py`):** Viết client kết nối Groq API gọi model `llama-3.1-8b-instant` (8B parameters, đáp ứng tiêu chí ≤ 10B), cấu hình rate-limiting và auto-retry.
 3. **Multi-Agent Orchestration:**
    - **OrderAgent:** Lấy thông tin đơn hàng, items, seller và dùng LLM tóm tắt trạng thái.
@@ -99,13 +99,29 @@ python src/main.py
 
 **Câu trả lời:**
 
-1. Dữ liệu khiếu nại đi qua CoordinatorAgent -> OrderAgent -> DeliveryAgent / PaymentAgent -> PolicyAgent -> VerifierAgent.
-2. Mỗi case được đối chiếu dữ liệu gốc CSV Olist để đảm bảo tính kiểm chứng được (Data-driven evidence).
-3. Hệ thống dùng model `llama-3.1-8b-instant` (8B params) qua Groq API ở mỗi bước agent để phân tích và đưa ra lý giải.
-4. Bằng chứng (evidence IDs) được sinh chuẩn hóa theo định dạng quy định (`order:<id>`, `item:<order_id>:<item_id>`, `payment:<order_id>:<seq>`, `seller:<seller_id>`, `policy:<code_code>`).
-5. Kết quả cuối cùng được VerifierAgent kiểm định schema và lưu thành file JSON trong folder `output/`.
+1. **Dữ liệu đi từ khiếu nại (input case) đến quyết định giải quyết như thế nào?**  
+   Dữ liệu từ file JSON khiếu nại (`input/EC_XXX.json`) chứa `claimed_order_id`. CoordinatorAgent nhận case_id và gọi OrderAgent tra cứu thông tin đơn hàng trong dữ liệu gốc CSV của Olist. OrderAgent chuyển dữ liệu cấu trúc `order_info` sang cho DeliveryAgent và PaymentAgent để kiểm tra thời gian giao thực tế vs ước tính và đối soát các dòng thanh toán. Toàn bộ bằng chứng từ 3 agent trên được tập hợp chuyển đến PolicyAgent để áp dụng quy tắc nghiệp vụ `EC_POLICY_V1` (thông qua mô hình LLM `llama-3.1-8b-instant`), sau đó VerifierAgent kiểm định schema, giới hạn phần tử và ghi kết quả ra file JSON ở folder `output/`.
+
+2. **Evaluation set và ground-truth document/evidence IDs dùng để đo chất lượng ra sao?**  
+   Evaluation set bao gồm 50 file JSON khiếu nại (`EC_001.json` đến `EC_050.json`). Mỗi case có tập bằng chứng chuẩn (ground-truth evidence IDs) được sinh trực tiếp từ các khóa trong CSV (`order:<id>`, `item:<order_id>:<item_id>`, `payment:<order_id>:<seq>`, `seller:<seller_id>`, `policy:<root_cause_code>`). Chất lượng của hệ thống được đo bằng độ chính xác của tập evidence IDs, việc xác định đúng bên chịu trách nhiệm (responsible_party), khoản tiền hoàn (recommended_refund_brl) và hành động xử lý (resolution_actions).
+
+3. **Quality checks khác Freshness monitoring ở điểm nào trong bài lab?**  
+   - **Quality checks:** Kiểm tra tính hợp lệ về mặt định dạng, tính nhất quán của dữ liệu (schema validation, kiểm tra giới hạn mảng max limits: max 5 entity IDs, 10 evidence IDs, 3 root causes, 3 responsible parties; kiểm tra số tiền hoàn không vượt quá số tiền đã thanh toán và kiểm tra confidence trong đoạn [0, 1]).
+   - **Freshness monitoring:** Giám sát mốc thời gian thực tế của đơn hàng (`order_purchase_timestamp`, `shipping_limit_date`, `order_delivered_carrier_date`, `order_delivered_customer_date`, `order_estimated_delivery_date`) để đảm bảo không áp dụng quy tắc hết hạn hoặc sai lệch thời gian.
+
+4. **Vì sao phải dùng cùng test set cho baseline, corrupted và repaired?**  
+   Sử dụng cùng một test set 50 khiếu nại chuẩn (`EC_001` - `EC_050`) giúp đảm bảo tính công bằng và có thể so sánh trực tiếp (fair & reproducible comparison) giữa các kiến trúc agent khác nhau (như Rule-based baseline vs Multi-Agent LLM). Việc này cho phép đo lường chính xác mức độ cải thiện về khả năng phân tích lý do gốc (root cause analysis), độ tin cậy (confidence score) và giảm thiểu hiện tượng hallucination của LLM.
+
+5. **Repair / Resolution được xem là thành công dựa trên artifact và metric nào?**  
+   - **Artifact:**  
+     1. 50 file kết quả JSON trong thư mục `output/` tuân thủ 100% Output Schema.  
+     2. Nhật ký chạy thực tế `logging/trace.jsonl` chứa đúng 300 trace entries phản ánh 6 bước handoff của các Agent cho 50 cases.  
+     3. Báo cáo cấu hình `logging/metadata.json` khai báo đúng mô hình LLM (`llama-3.1-8b-instant`, parameter size `8B`).  
+   - **Metrics:** Điểm tổng hợp có trọng số theo đề bài (20% Primary issue & confidence, 20% Affected entities, 15% Root cause & responsible parties, 15% Evidence IDs, 20% Financial resolution, 10% Resolution actions) đạt tối đa và 0 case bị lỗi hard gate.
 
 ## 8. Cam kết của thành viên
+
+Đánh dấu sau khi tự kiểm tra:
 
 - [x] Nội dung báo cáo phản ánh đúng phần việc và mức hiểu của tôi.
 - [x] Tôi có thể giải thích luồng end-to-end, không chỉ module mình phụ trách.

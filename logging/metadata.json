@@ -5,10 +5,10 @@
   "runtime": {
     "python_version": "3.13.5",
     "os": "win32",
-    "data_load_time_seconds": 1.01,
-    "processing_time_seconds": 1663.33,
-    "total_llm_calls": 71,
-    "total_tokens_used": 89047
+    "data_load_time_seconds": 1.02,
+    "processing_time_seconds": 1472.44,
+    "total_llm_calls": 80,
+    "total_tokens_used": 98730
   },
   "agents": [
     {
@@ -38,5 +38,5 @@
   ],
   "policy_version": "EC_POLICY_V1",
   "api_provider": "Groq",
-  "generated_at": "2026-08-05T05:06:36.827262+00:00"
+  "generated_at": "2026-08-05T05:23:04.064651+00:00"
 }
