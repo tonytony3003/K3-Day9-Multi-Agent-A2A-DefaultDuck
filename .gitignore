@@ -22,3 +22,6 @@ Thumbs.db
 
 # Data (large CSV files)
 data/*.csv
+
+output/*.json
+trace.jsonl
