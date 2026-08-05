@@ -1,49 +1,58 @@
 {
-  "framework": "Custom Python Multi-Agent (no LLM framework dependency)",
+  "framework": "Custom Python Multi-Agent Pipeline",
+  "policy_version": "EC_POLICY_V1",
   "agents": [
     {
       "name": "CoordinatorAgent",
       "role": "Orchestrates the pipeline, assembles final output",
-      "model": null,
-      "parameter_size": null
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "No LLM used. Deterministic orchestration only."
     },
     {
       "name": "OrderSellerAgent",
-      "role": "Retrieves order status, items, seller handoff timing",
-      "model": null,
-      "parameter_size": null
+      "role": "Retrieves order status, items, seller handoff timing from CSV",
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "Pandas DataFrame lookup + datetime comparison. No LLM."
     },
     {
       "name": "PaymentAgent",
       "role": "Retrieves payment rows, computes totals, detects split payments",
-      "model": null,
-      "parameter_size": null
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "Arithmetic aggregation on CSV data. No LLM."
     },
     {
       "name": "DeliveryAgent",
       "role": "Compares delivery dates, determines if delivery was late",
-      "model": null,
-      "parameter_size": null
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "Datetime comparison logic. No LLM."
     },
     {
       "name": "PolicyAgent",
       "role": "Applies EC_POLICY_V1 business rules, determines primary_issue and refund",
-      "model": null,
-      "parameter_size": null
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "6-rule deterministic priority chain. No LLM. All agents < 10B constraint satisfied."
     },
     {
       "name": "VerifierAgent",
       "role": "Validates output schema, evidence IDs, array limits, and financials",
-      "model": null,
-      "parameter_size": null
+      "model": "rule-based",
+      "parameter_size_b": 0,
+      "note": "Regex + schema validation. No LLM."
     }
   ],
+  "compliance": {
+    "max_parameter_limit_b": 10,
+    "all_agents_within_limit": true,
+    "approach": "All business rules are fully deterministic from CSV data. No generative model is needed or used. Each agent is 0B (rule-based) which is strictly less than 10B."
+  },
   "runtime": {
     "language": "Python 3.11+",
     "dependencies": ["pandas>=1.5.0", "python-dotenv>=1.0.0"],
-    "policy_version": "EC_POLICY_V1",
-    "dataset": "Olist Brazilian E-Commerce Public Dataset",
-    "approach": "Deterministic rule-based multi-agent pipeline. No LLM calls needed as business rules are fully deterministic from CSV data.",
-    "note": "Each agent class has a single responsibility and passes structured data (handoff) to the next agent. All agents operate within the 10B parameter limit constraint (no generative models used)."
+    "dataset": "Olist Brazilian E-Commerce Public Dataset"
   }
 }
