@@ -2,3 +2,4 @@ input/*.json
 .env
 __pycache__/
 output.zip
+output/*.json
