@@ -1,111 +1,81 @@
-# Member Role Report — Day 9: Multi Agent A2A
-
-> Mỗi thành viên trong nhóm tự hoàn thành mẫu này để báo cáo đúng vai trò, phần việc và mức hiểu của mình. Không sao chép nguyên báo cáo chung hoặc báo cáo của thành viên khác. Thay nội dung trong dấu `[ ]` và xóa các dòng hướng dẫn không cần thiết trước khi nộp.
+# Báo cáo cá nhân — Phí Đình Hoàng Anh
 
 ## 1. Thông tin cá nhân
 
-| Thông tin       | Nội dung     |
-| --------------- | ------------ |
-| Họ và tên       | Phí Đình Hoàng Anh  |
-| MSSV            | 2A202601853       |
-| Khóa/Lớp        | K3         |
-| Vai trò chính   | Xây dựng pipeline và kiểm thử dữ liệu | 
+| Thông tin | Nội dung |
+| --- | --- |
+| Họ và tên | Phí Đình Hoàng Anh |
+| MSSV | 2A202601853 |
+| Khóa/Lớp | K3 |
+| Vai trò chính | Order & Seller Agent |
 | Ngày hoàn thành | 2026-08-05 |
 
-## 2. Vai trò và phạm vi công việc
+## 2. Phần việc được phân công
 
-### Phần việc sở hữu
+| Module | File/hàm | Input | Output | Trạng thái |
+| --- | --- | --- | --- | --- |
+| Index order/item | `src/data_catalog.py` — `DataCatalog` | Orders và order items CSV | Read-only indexes | Hoàn thành |
+| Order/Seller finding | `src/policy_engine.py` — `specialist_findings` | `order_id` | Status, item IDs, seller IDs, violating items/sellers | Hoàn thành |
+| Evidence order/item/seller | `src/policy_engine.py` | Finding đã chuẩn hóa | Evidence IDs hợp lệ | Hoàn thành |
 
-| Module/deliverable | File/hàm phụ trách | Input nhận vào | Output bàn giao   | Trạng thái                            |
-| ------------------ | ------------------ | -------------- | ----------------- | ------------------------------------- |
-| Triển khai pipeline xử lý case | `process_cases.py` | `input/EC_*.json`, `data/*.csv` | `output/EC_*.json`, `logging/trace.jsonl` | Hoàn thành |
-| Xây dựng tài liệu kiến trúc agent | `architecture.md` | Yêu cầu assignment | Mô tả luồng handoff | Hoàn thành |
+## 3. Kết quả bàn giao
 
-Chỉ nhận ownership cho phần bạn trực tiếp thực hiện. Liên hệ rõ phần việc của bạn với đầu vào, đầu ra và các thành viên phụ thuộc vào phần đó.
+- Xác minh order tồn tại và lấy đúng status.
+- Giữ đầy đủ item của order, không chọn một item đại diện.
+- Group seller và xác định seller vi phạm nếu carrier nhận hàng sau shipping limit của ít nhất một item.
+- Hỗ trợ đúng 8 unavailable order không có item bằng các danh sách rỗng.
 
-### Việc hỗ trợ ngoài phạm vi chính
+## 4. Giải thích kỹ thuật
 
-| Hoạt động                 | Thành viên/module được hỗ trợ | Kết quả                 |
-| ------------------------- | ----------------------------- | ----------------------- |
-| Xây dựng logic rule-based và kiểm thử | Toàn bộ pipeline | Script chạy đúng với dữ liệu Olist hiện có | Traces và metadata |
+Data Catalog parse CSV một lần, tạo `orders` và `items_by_order`. Mỗi item được chuẩn hóa thành `ItemRow` bất biến. Order/Seller finding trả `item_ids`, `seller_ids`, `violating_item_ids`, `violating_seller_ids` và `seller_handoff_late`. Phép so sánh sử dụng timestamp gốc trong CSV:
 
-## 3. Kết quả theo vai trò
+```text
+order_delivered_carrier_date > shipping_limit_date
+```
 
-| Nhiệm vụ đã thực hiện | File/hàm/artifact liên quan | Kết quả bàn giao          | Cách xác minh   |
-| --------------------- | --------------------------- | ------------------------- | --------------- |
-| Tạo pipeline xử lý case | `process_cases.py` | Script tạo output JSON theo schema | `python process_cases.py` |
-| Chuẩn bị tài liệu kiến trúc | `architecture.md` | Mô tả rõ vai trò agent và luồng handoff | Xem file architecture.md |
-
-Nêu một output cụ thể mà phần việc của bạn tạo ra hoặc giúp xác minh:
-
-Tạo `output/EC_*.json` theo schema bài tập và `logging/trace.jsonl` cho mỗi case.
-
-## 4. Giải thích phần kỹ thuật đã thực hiện
-
-### Vấn đề cần giải quyết
-
-Xây dựng mô-đun xử lý case tự động, từ đọc input JSON, join dữ liệu Olist, phân tích trạng thái order, đối soát payment, đến quyết định chính sách và xuất JSON đầu ra.
-
-### Cách triển khai
-
-Pipeline sử dụng quy tắc xác định issue theo thứ tự ưu tiên trong đề bài. `OrderSellerAgent` tính tổng giá trị item/freight và xác định seller muộn. `PaymentAgent` kiểm tra split payment và khớp tổng thanh toán với tổng chi phí. `PolicyAgent` quyết định refund và action dựa trên trạng thái order và các điều kiện đã cho. Kết quả được validate sơ bộ bởi `VerifierAgent`.
-
-### Input, output và contract
-
-| Thành phần              | Mô tả                                  |
-| ----------------------- | -------------------------------------- |
-| Input                   | `input/EC_*.json`, `data/*.csv`        |
-| Output                  | `output/EC_*.json`, `logging/trace.jsonl`, `metadata.json` |
-| Module phụ thuộc        | `process_cases.py`, `DataLoader`, `PolicyAgent` |
-| Module sử dụng output   | Người chấm, hệ thống score output | 
-| Điều kiện lỗi cần xử lý | Missing order, thiếu file input, payment mismatch |
+| Thành phần | Contract |
+| --- | --- |
+| Input | Một `claimed_order_id` đã tồn tại trong orders |
+| Output | `order_seller` finding có cấu trúc |
+| Module sử dụng output | Delivery Agent, Policy Agent và Verifier |
+| Edge case | Order unavailable không item; nhiều item; nhiều shipping limit |
 
 ### Cách xác minh
 
-```bash
-python process_cases.py
+```powershell
+python -m pytest -q
+python -m src.main --mode deterministic --case EC_001
+python -m src.main --mode deterministic --case EC_005
 ```
 
-- **Kết quả mong đợi:** Tạo các file JSON trong `output/` và ghi trace vào `logging/trace.jsonl`.
-- **Kết quả thực tế:** Nếu chưa có file `EC_*.json` trong `input/`, script sẽ ghi trace trạng thái `no_cases_found`.
-- **Artifact/log:** `logging/trace.jsonl`, `logging/metadata.json`
+`EC_001` kiểm tra seller giao muộn; `EC_005` kiểm tra unavailable không item.
 
-## 5. Một quyết định kỹ thuật quan trọng
+## 5. Quyết định kỹ thuật quan trọng
 
-- **Bối cảnh:** Quyết định sử dụng pipeline rule-based thay vì phụ thuộc LLM, vì đề bài yêu cầu luật nghiệp vụ rõ ràng và cần đầu ra tiêu chuẩn JSON.
-- **Các phương án đã cân nhắc:** Sử dụng LLM để suy diễn và sinh output tự do; xây dựng pipeline deterministic bằng Python.
-- **Phương án đã chọn:** Chọn pipeline deterministic rule-based.
-- **Lý do:** Phương án rule-based cho phép kiểm soát chính xác điều kiện order/item/payment và dễ xác minh, đánh đổi bằng ít linh hoạt hơn so với LLM.
-- **Bằng chứng quyết định phù hợp:** Artifact: `process_cases.py` và `logging/metadata.json`.
+- **Bối cảnh:** một order có thể có nhiều item và seller.
+- **Phương án:** lấy shipping limit đầu tiên hoặc đánh giá mọi item theo seller.
+- **Lựa chọn:** đánh giá mọi item, sau đó group violating seller.
+- **Lý do:** tránh bỏ sót seller trễ và tạo đúng item evidence.
+- **Bằng chứng:** case nhiều item vẫn có totals/entity đầy đủ; bộ chính thức tối đa ba item.
 
-## 6. Một lỗi hoặc blocker đã xử lý
+## 6. Lỗi/blocker đã xử lý
 
-- **Triệu chứng/lỗi nguyên văn:** Không có file input case chính thức nên không sinh được output JSON.
-- **Lệnh hoặc bước tái hiện:** `python process_cases.py`
-- **Nguyên nhân gốc:** Thư mục `input/` chỉ chứa `.gitkeep`; tập tin `EC_001.json`..`EC_050.json` chưa được cung cấp.
-- **Cách xử lý:** Tạo `process_cases.py`, `architecture.md`, `logging/metadata.json`, `logging/trace.jsonl` để chuẩn bị sẵn pipeline và định dạng output.
-- **Cách xác minh sau khi sửa:** `python process_cases.py` -> trace `no_cases_found` nếu không có input case JSON.
-- **Điều học được:** Luôn kiểm tra đầu vào trước khi chạy pipeline; tách biệt rõ agent dữ liệu và agent chính sách giúp dễ bảo trì.
+- **Triệu chứng:** unavailable order không có item dễ bị coi là lỗi join.
+- **Nguyên nhân:** Olist có payment/order nhưng không có item row cho một số unavailable order.
+- **Xử lý:** trả danh sách item/seller rỗng thay vì fail; không suy diễn item.
+- **Xác minh:** 8/8 unavailable case có item/freight bằng 0 và full refund payment.
 
-## 7. Hiểu biết về luồng end-to-end
+## 7. Hiểu biết end-to-end
 
-Giải thích ngắn gọn bằng lời của bạn:
+Order/Seller finding là một trong ba handoff song song. Payment tính tài chính; Delivery dùng timestamp và violating seller; Policy chọn rule theo precedence. Verifier đối chiếu lại các ID với Data Catalog trước khi writer ghi output.
 
-1. Dữ liệu Olist được đọc vào bằng `DataLoader` từ các file CSV, sau đó gộp theo `claimed_order_id` từ case input.
-2. Evaluation set là các case `EC_*.json`, và ground-truth được suy luận từ quy tắc nghiệp vụ trong đề bài.
-3. Quality checks đảm bảo schema JSON, giá trị issue hợp lệ và tổng refund được làm tròn chính xác; khác với freshness monitoring ở chỗ quality checks tập trung vào correctness của output.
-4. Dùng cùng test set để giữ benchmark nhất quán giữa các phiên bản và đảm bảo toàn bộ case được so sánh theo cùng thang điểm.
-5. Repair được xem là thành công khi `output/EC_*.json` có cấu trúc đúng, trace được ghi lại đầy đủ, và `metadata.json` mô tả runtime.
+## 8. Cam kết
 
-## 8. Cam kết của thành viên
+- [x] Hiểu cardinality order–item–seller.
+- [x] Không tạo seller/item không tồn tại.
+- [x] Có lệnh kiểm chứng phần việc.
+- [x] Báo cáo không chứa secret.
 
-Đánh dấu sau khi tự kiểm tra:
-
-- [x] Nội dung báo cáo phản ánh đúng phần việc và mức hiểu của tôi.
-- [x] Tôi có thể giải thích luồng end-to-end, không chỉ module mình phụ trách.
-- [x] Tôi không ghi “đã chạy thành công” cho phần chưa được kiểm chứng.
-- [x] Báo cáo không chứa `.env`, API key, token hoặc secret.
-- [x] Báo cáo này không phải bản sao nguyên văn của báo cáo nhóm hoặc báo cáo của thành viên khác.
-
-**Họ và tên:** Phí Đình Hoàng Anh
+**Họ và tên:** Phí Đình Hoàng Anh  
 **Ngày xác nhận:** 2026-08-05
+
