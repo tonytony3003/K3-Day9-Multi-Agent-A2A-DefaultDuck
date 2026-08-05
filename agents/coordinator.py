@@ -18,6 +18,7 @@ from .payment import PaymentAgent
 from .delivery import DeliveryAgent
 from .policy import PolicyAgent
 from .verifier import VerifierAgent
+from .llm_client import LLMClient
 
 
 class CoordinatorAgent:
@@ -31,7 +32,13 @@ class CoordinatorAgent:
         self.order_seller_agent = OrderSellerAgent(data_loader)
         self.payment_agent = PaymentAgent(data_loader)
         self.delivery_agent = DeliveryAgent()
-        self.policy_agent = PolicyAgent()
+        # Initialize LLM client (once, shared across all cases)
+        try:
+            self.llm_client = LLMClient()
+        except Exception as e:
+            print(f"[Coordinator] Warning: LLM unavailable ({e}), using deterministic fallback")
+            self.llm_client = None
+        self.policy_agent = PolicyAgent(self.llm_client)
         self.verifier_agent = VerifierAgent()
 
     def process_case(self, case_input: dict) -> tuple[dict, dict]:
@@ -108,6 +115,8 @@ class CoordinatorAgent:
                 "root_cause_code": policy_data["root_cause_code"],
                 "recommended_refund_brl": policy_data["recommended_refund_brl"],
                 "resolution_actions": policy_data["resolution_actions"],
+                "llm_used": policy_data.get("llm_used", False),
+                "llm_reasoning": policy_data.get("llm_reasoning", ""),
             }
         })
 
