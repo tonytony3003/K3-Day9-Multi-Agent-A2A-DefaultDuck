@@ -1,0 +1,26 @@
+{
+  "total_cases": 50,
+  "issues": {
+    "unsupported_late_claim": 26,
+    "unavailable_order_paid": 11,
+    "valid_split_payment": 9,
+    "late_delivery_seller": 4
+  },
+  "statuses": {
+    "no_action": 35,
+    "action_required": 15
+  },
+  "total_refund_brl": 2656.66,
+  "actions": {
+    "reject_late_refund": 26,
+    "issue_full_refund": 11,
+    "explain_valid_split_payment": 9,
+    "refund_freight": 4
+  },
+  "causes": {
+    "DELIVERY_WITHIN_ESTIMATE": 26,
+    "ORDER_UNAVAILABLE_AFTER_PAYMENT": 11,
+    "MULTIPLE_PAYMENTS_RECONCILED": 9,
+    "SELLER_HANDOFF_AFTER_LIMIT": 4
+  }
+}

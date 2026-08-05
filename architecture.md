@@ -1,146 +1,142 @@
-# Multi-Agent Architecture — E-commerce Dispute Resolution
+# Architecture - Multi-Agent E-commerce Dispute Resolution
 
-## Tổng quan
+## Tổng quan hệ thống
 
-Hệ thống multi-agent xử lý 50 khiếu nại khách hàng thương mại điện tử trên dữ liệu Olist.
-Mỗi agent chuyên trách một domain dữ liệu, truy vấn dữ liệu từ CSV và gửi context cho **LLM Model (`llama-3.1-8b-instant` - 8B parameters qua Groq REST API)** để phân tích, đưa ra suy luận (reasoning) và ra quyết định. Kết quả được handoff giữa các agent qua Python dict, và Coordinator điều phối toàn bộ pipeline.
+Hệ thống gồm **6 Agent** được điều phối tuần tự bởi `CoordinatorAgent`. Mỗi agent có trách nhiệm đơn lẻ (Single Responsibility), nhận dữ liệu qua **handoff** từ agent trước và trả kết quả có cấu trúc cho agent tiếp theo.
 
 ## Sơ đồ kiến trúc
 
-```mermaid
-flowchart TD
-    subgraph Input
-        CASE["Case JSON<br/>input/EC_XXX.json"]
-    end
-
-    subgraph Agents
-        COORD["🎯 CoordinatorAgent<br/>Điều phối & tổng hợp"]
-        ORDER["📦 OrderAgent<br/>Đơn hàng & Seller"]
-        DELIV["🚚 DeliveryAgent<br/>Giao hàng"]
-        PAY["💳 PaymentAgent<br/>Thanh toán"]
-        POLICY["📋 PolicyAgent<br/>Quy tắc nghiệp vụ"]
-        VERIFY["✅ VerifierAgent<br/>Kiểm tra & ghi output"]
-    end
-
-    subgraph LLM_Service
-        GROQ["🤖 Groq API<br/>llama-3.1-8b-instant (8B params)"]
-    end
-
-    subgraph Data
-        CSV["📊 Olist CSV<br/>orders, items, payments, sellers"]
-    end
-
-    subgraph Output
-        OUT["output/EC_XXX.json"]
-        TRACE["logging/trace.jsonl"]
-    end
-
-    CASE --> COORD
-    COORD -->|"1. claimed_order_id"| ORDER
-    ORDER -->|"2. order_info"| DELIV
-    ORDER -->|"2. order_info"| PAY
-    DELIV -->|"3. delivery_info"| POLICY
-    PAY -->|"3. payment_info"| POLICY
-    ORDER -->|"2. order_info"| POLICY
-    POLICY -->|"4. policy_result"| VERIFY
-    VERIFY --> OUT
-
-    CSV -.->|"lookup"| ORDER
-    CSV -.->|"lookup"| PAY
-
-    ORDER <-->|"LLM call"| GROQ
-    DELIV <-->|"LLM call"| GROQ
-    PAY <-->|"LLM call"| GROQ
-    POLICY <-->|"LLM call"| GROQ
-    VERIFY <-->|"LLM call"| GROQ
-
-    COORD -->|"trace"| TRACE
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        INPUT LAYER                          │
+│              input/EC_001.json ... EC_050.json              │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ case_input (JSON)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   CoordinatorAgent                          │
+│  - Nhận case input                                          │
+│  - Gọi tuần tự các sub-agent                               │
+│  - Tổng hợp output JSON theo schema                         │
+│  - Ghi file output + trace                                  │
+└──┬──────────┬──────────┬──────────┬──────────┬─────────────┘
+   │          │          │          │          │
+   ▼          ▼          ▼          ▼          ▼
+ Step 1     Step 2     Step 3     Step 4     Step 5
+   │          │          │          │          │
+┌──┴──┐    ┌──┴──┐    ┌──┴──┐    ┌──┴──┐    ┌──┴──┐
+│Order│    │Pay- │    │Deli-│    │Pol- │    │Veri-│
+│Seller    │ment │    │very │    │icy  │    │fier │
+│Agent│    │Agent│    │Agent│    │Agent│    │Agent│
+└──┬──┘    └──┬──┘    └──┬──┘    └──┬──┘    └──┬──┘
+   │          │          │          │          │
+   ▼          ▼          ▼          ▼          ▼
+order_data payment_data delivery  policy    validated
+              data       _data     _data     output
 ```
 
-## Vai trò từng Agent & Tích hợp LLM
+## Chi tiết từng Agent
 
-### 1. CoordinatorAgent (`src/agents/coordinator_agent.py`)
-- **Vai trò:** Điều phối pipeline, nhận case input, gọi lần lượt các agent chuyên biệt.
-- **Quyền truy cập dữ liệu:** Không truy cập CSV trực tiếp.
-- **Input:** Case JSON.
-- **Output:** Output JSON hoàn chỉnh + trace entries.
-- **Handoff:** Gọi OrderAgent → DeliveryAgent → PaymentAgent → PolicyAgent → VerifierAgent.
+### 1. DataLoader (Shared Resource)
+- **Vai trò**: Load toàn bộ 9 file CSV Olist vào bộ nhớ khi khởi động
+- **Quyền truy cập**: Toàn bộ file trong `data/`
+- **Output**: Pandas DataFrames, query helpers theo `order_id`
+- **Pattern**: Singleton, được inject vào tất cả agents cần đọc dữ liệu
 
-### 2. OrderAgent (`src/agents/order_agent.py`)
-- **Vai trò:** Truy vấn trạng thái đơn hàng, danh sách sản phẩm, seller và mốc thời gian từ CSV, sau đó gọi LLM để phân tích cấu trúc đơn hàng.
-- **Quyền truy cập dữ liệu:** `orders`, `order_items`, `sellers`.
-- **LLM Call:** Gửi prompt tổng hợp thông tin đơn hàng cho LLM (`llama-3.1-8b-instant`) để đánh giá.
-- **Output:** `order_info` dict (status, items, sellers, totals, timestamps, llm_analysis).
-- **Handoff → DeliveryAgent, PaymentAgent, PolicyAgent**
+### 2. CoordinatorAgent
+- **Vai trò**: Điều phối pipeline, tổng hợp output cuối
+- **Quyền truy cập**: Tất cả sub-agents
+- **Input**: `case_input` (dict từ JSON file)
+- **Output**: `(output_json, trace_record)`
+- **Handoff**: Gọi từng agent theo thứ tự, truyền output của agent trước làm input cho agent sau
 
-### 3. DeliveryAgent (`src/agents/delivery_agent.py`)
-- **Vai trò:** Phân tích thời gian giao hàng thực tế so với dự kiến và mốc bàn giao của seller để xác định trách nhiệm (seller vs logistics provider).
-- **LLM Call:** Gửi mốc timestamps và shipping limits cho LLM phân tích logic giao trễ.
-- **Output:** `delivery_info` dict (is_late, is_seller_late, late_seller_ids, llm_reasoning).
-- **Handoff → PolicyAgent**
+### 3. OrderSellerAgent
+- **Vai trò**: Truy vấn thông tin đơn hàng, item, seller
+- **Quyền truy cập**: `orders`, `order_items`, `sellers` tables
+- **Input**: `order_id`
+- **Output**:
+  - `order_status`, timestamps
+  - Danh sách `items` (price, freight, shipping_limit_date)
+  - `seller_ids`, `item_total_brl`, `freight_total_brl`
+  - `late_seller_handoff` (bool): carrier nhận hàng sau `shipping_limit_date`
+  - `late_seller_ids`: danh sách seller vi phạm hạn bàn giao
 
-### 4. PaymentAgent (`src/agents/payment_agent.py`)
-- **Vai trò:** Phân tích các dòng thanh toán từ CSV và gọi LLM đối soát với giá trị đơn hàng (items + freight).
-- **LLM Call:** Gửi thông tin các dòng thanh toán cho LLM để kiểm tra tính khớp (reconciled) và phát hiện split payment.
-- **Output:** `payment_info` dict (payment_total, is_reconciled, has_split_payment, llm_reasoning).
-- **Handoff → PolicyAgent**
+### 4. PaymentAgent
+- **Vai trò**: Phân tích thanh toán, đối soát với giá trị đơn hàng
+- **Quyền truy cập**: `order_payments` table
+- **Input**: `order_id`, `item_total_brl`, `freight_total_brl`
+- **Output**:
+  - Danh sách `payments`, `payment_total_brl`
+  - `is_split_payment` (bool): có ≥ 2 payment rows
+  - `payment_matches_order` (bool): tổng payment khớp item+freight trong ±0.10 BRL
 
-### 5. PolicyAgent (`src/agents/policy_agent.py`)
-- **Vai trò:** Áp dụng bộ quy tắc `EC_POLICY_V1` dựa trên bằng chứng từ 3 agent trên để đưa ra quyết định giải quyết khiếu nại.
-- **LLM Call:** Gửi toàn bộ bằng chứng (order, delivery, payment) và 6 quy tắc nghiệp vụ cho LLM phân tích theo thứ tự ưu tiên.
-- **Output:** `policy_result` dict (primary_issue, refund, actions, root_cause, llm_reasoning).
-- **Handoff → VerifierAgent**
+### 5. DeliveryAgent
+- **Vai trò**: Phân tích timing giao hàng
+- **Quyền truy cập**: Dữ liệu từ `OrderSellerAgent` (không query CSV trực tiếp)
+- **Input**: `order_data` từ OrderSellerAgent
+- **Output**:
+  - `late_delivery_to_customer` (bool): giao sau `order_estimated_delivery_date`
+  - `delivered_to_customer` (bool)
+  - Các timestamp để trace
 
-### 6. VerifierAgent (`src/agents/verifier_agent.py`)
-- **Vai trò:** Xây dựng output JSON, kiểm tra định dạng evidence ID, validate giới hạn mảng (max limits) và gọi LLM kiểm tra tính hợp lệ của schema.
-- **LLM Call:** Gửi output JSON hoàn chỉnh cho LLM thẩm định tính chính xác trước khi ghi file.
-- **Output:** JSON file trong `output/`.
+### 6. PolicyAgent
+- **Vai trò**: Áp dụng EC_POLICY_V1, quyết định kết quả
+- **Quyền truy cập**: Chỉ nhận output từ 3 agents trước (không query CSV)
+- **Input**: `order_data`, `payment_data`, `delivery_data`
+- **Luồng quyết định** (theo thứ tự ưu tiên):
+  1. `canceled_order_paid` → hoàn toàn bộ payment
+  2. `unavailable_order_paid` → hoàn toàn bộ payment
+  3. `late_delivery_seller` → hoàn freight (seller bàn giao muộn)
+  4. `late_delivery_logistics` → hoàn freight (vận chuyển giao muộn)
+  5. `valid_split_payment` → không hoàn, giải thích
+  6. `unsupported_late_claim` → từ chối claim
+- **Output**: `primary_issue`, `responsible_parties`, `recommended_refund_brl`, `resolution_actions`
+
+### 7. VerifierAgent
+- **Vai trò**: Kiểm tra và fix output trước khi ghi file
+- **Quyền truy cập**: Output JSON từ bước assembly
+- **Kiểm tra**:
+  - Schema compliance (primary_issue, case_status valid values)
+  - Evidence ID format (regex validation)
+  - Array limits: max 5 entity IDs, max 10 evidence IDs, max 3 root causes, max 3 responsible parties, max 5 actions
+  - Clamp confidence trong [0, 1]
+  - Round số tiền về 2 chữ số thập phân
 
 ## Luồng Handoff
 
 ```
-Case JSON
-  │
-  ▼
 CoordinatorAgent
-  │
-  ├──► OrderAgent.analyze(order_id)
-  │     │ (Data Query + LLM call)
-  │     ▼ order_info
-  │     ├──► DeliveryAgent.analyze(order_info)
-  │     │     │ (LLM call)
-  │     │     ▼ delivery_info
-  │     │
-  │     └──► PaymentAgent.analyze(order_id, order_info)
-  │           │ (Data Query + LLM call)
-  │           ▼ payment_info
-  │
-  ├──► PolicyAgent.analyze(order_info, delivery_info, payment_info)
-  │     │ (LLM Policy call)
-  │     ▼ policy_result
-  │
-  └──► VerifierAgent.build_and_verify(...)
-        │ (LLM Verification call)
-        ▼ output JSON file
+    │
+    ├─► OrderSellerAgent(order_id)
+    │       └─► order_data {status, items, freight_total, late_seller_handoff, ...}
+    │
+    ├─► PaymentAgent(order_id, item_total, freight_total)
+    │       └─► payment_data {payment_total, is_split_payment, payment_matches, ...}
+    │
+    ├─► DeliveryAgent(order_data)
+    │       └─► delivery_data {late_delivery_to_customer, ...}
+    │
+    ├─► PolicyAgent(order_data, payment_data, delivery_data)
+    │       └─► policy_data {primary_issue, refund, actions, ...}
+    │
+    ├─► [assemble output JSON]
+    │
+    └─► VerifierAgent(output)
+            └─► validated_output → ghi file
 ```
 
-## Quy tắc nghiệp vụ (EC_POLICY_V1)
+## Quyền truy cập dữ liệu
 
-Áp dụng theo thứ tự ưu tiên:
+| Agent | orders | order_items | order_payments | sellers | Agents khác |
+|-------|--------|-------------|----------------|---------|-------------|
+| DataLoader | ✓ | ✓ | ✓ | ✓ | - |
+| OrderSellerAgent | ✓ | ✓ | - | ✓ | DataLoader |
+| PaymentAgent | - | - | ✓ | - | DataLoader |
+| DeliveryAgent | - | - | - | - | order_data |
+| PolicyAgent | - | - | - | - | 3 agent outputs |
+| VerifierAgent | - | - | - | - | assembled output |
 
-| # | Primary Issue | Root Cause Code | Responsible | Refund | Action |
-|---|--------------|-----------------|-------------|--------|--------|
-| 1 | canceled_order_paid | ORDER_CANCELED_AFTER_PAYMENT | platform | Full payment | issue_full_refund |
-| 2 | unavailable_order_paid | ORDER_UNAVAILABLE_AFTER_PAYMENT | platform | Full payment | issue_full_refund |
-| 3 | late_delivery_seller | SELLER_HANDOFF_AFTER_LIMIT | seller | Freight | refund_freight |
-| 4 | late_delivery_logistics | CARRIER_DELIVERED_AFTER_ESTIMATE | logistics | Freight | refund_freight |
-| 5 | valid_split_payment | MULTIPLE_PAYMENTS_RECONCILED | — | 0 | explain_valid_split_payment |
-| 6 | unsupported_late_claim | DELIVERY_WITHIN_ESTIMATE | — | 0 | reject_late_refund |
+## Output
 
-## Technology Stack
-
-- **Ngôn ngữ:** Python 3.13 (stdlib + Groq REST API)
-- **Mô hình LLM:** `llama-3.1-8b-instant` (8B parameters ≤ 10B parameters limit)
-- **Provider API:** Groq Cloud API (`https://api.groq.com/openai/v1/chat/completions`)
-- **Data access:** `csv.DictReader` → in-memory dict lookup O(1)
-- **Trace format:** JSONL (6 entries per case = 300 entries total)
+- **`output/EC_XXX.json`**: Kết quả xử lý từng case theo schema bắt buộc
+- **`trace.jsonl`**: Log trace từng bước xử lý của 50 case (1 dòng JSON/case)

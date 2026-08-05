@@ -1,6 +1,27 @@
-.env
-.venv/
+# Python
 __pycache__/
 *.pyc
-scratch/
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (large CSV files)
+data/*.csv
+
 output/*.json
+trace.jsonl
