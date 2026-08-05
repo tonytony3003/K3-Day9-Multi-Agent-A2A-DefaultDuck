@@ -1,77 +1,142 @@
-# Multi-Agent Architecture Specification — E-commerce Dispute Resolution
+# Architecture - Multi-Agent E-commerce Dispute Resolution
 
-Hệ thống được thiết kế theo kiến trúc **Multi-Agent Handoff Workflow** nhằm xử lý tự động các khiếu nại thương mại điện tử trên dữ liệu Olist theo bộ quy tắc nghiệp vụ `EC_POLICY_V1`.
+## Tổng quan hệ thống
 
----
+Hệ thống gồm **6 Agent** được điều phối tuần tự bởi `CoordinatorAgent`. Mỗi agent có trách nhiệm đơn lẻ (Single Responsibility), nhận dữ liệu qua **handoff** từ agent trước và trả kết quả có cấu trúc cho agent tiếp theo.
 
-## 1. Sơ đồ hệ thống Agent (Agent Diagram)
+## Sơ đồ kiến trúc
 
-                   ┌─────────────────────────┐
-                   │    Coordinator Agent    │
-                   └────────────┬────────────┘
-                                │ (Input Case Ticket)
-       ┌────────────────────────┼────────────────────────┐
-       ▼                        ▼                        ▼
-┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐
-│   Order & Seller   │    │   Payment Agent    │    │   Delivery Agent   │
-│       Agent        │    │                    │    │                    │
-└──────────┬─────────┘    └─────────┬──────────┘    └─────────┬──────────┘
-│                        │                         │
-└────────────────────────┼─────────────────────────┘
-│ (Domain Evidence Payload)
-▼
-┌─────────────────────────┐
-│      Policy Agent       │ (EC_POLICY_V1 Engine)
-└────────────┬────────────┘
-│ (Draft Resolution)
-▼
-┌─────────────────────────┐
-│     Verifier Agent      │ (Schema & Limit Validation)
-└────────────┬────────────┘
-│
-▼
-[output/EC_xxx.json & trace.jsonl]
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        INPUT LAYER                          │
+│              input/EC_001.json ... EC_050.json              │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ case_input (JSON)
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   CoordinatorAgent                          │
+│  - Nhận case input                                          │
+│  - Gọi tuần tự các sub-agent                               │
+│  - Tổng hợp output JSON theo schema                         │
+│  - Ghi file output + trace                                  │
+└──┬──────────┬──────────┬──────────┬──────────┬─────────────┘
+   │          │          │          │          │
+   ▼          ▼          ▼          ▼          ▼
+ Step 1     Step 2     Step 3     Step 4     Step 5
+   │          │          │          │          │
+┌──┴──┐    ┌──┴──┐    ┌──┴──┐    ┌──┴──┐    ┌──┴──┐
+│Order│    │Pay- │    │Deli-│    │Pol- │    │Veri-│
+│Seller    │ment │    │very │    │icy  │    │fier │
+│Agent│    │Agent│    │Agent│    │Agent│    │Agent│
+└──┬──┘    └──┬──┘    └──┬──┘    └──┬──┘    └──┬──┘
+   │          │          │          │          │
+   ▼          ▼          ▼          ▼          ▼
+order_data payment_data delivery  policy    validated
+              data       _data     _data     output
+```
 
+## Chi tiết từng Agent
 
----
+### 1. DataLoader (Shared Resource)
+- **Vai trò**: Load toàn bộ 9 file CSV Olist vào bộ nhớ khi khởi động
+- **Quyền truy cập**: Toàn bộ file trong `data/`
+- **Output**: Pandas DataFrames, query helpers theo `order_id`
+- **Pattern**: Singleton, được inject vào tất cả agents cần đọc dữ liệu
 
-## 2. Vai trò và Quyền truy cập dữ liệu (Roles & Access Permissions)
+### 2. CoordinatorAgent
+- **Vai trò**: Điều phối pipeline, tổng hợp output cuối
+- **Quyền truy cập**: Tất cả sub-agents
+- **Input**: `case_input` (dict từ JSON file)
+- **Output**: `(output_json, trace_record)`
+- **Handoff**: Gọi từng agent theo thứ tự, truyền output của agent trước làm input cho agent sau
 
-| Agent Name | Vai trò chính (Role) | Thao tác | Quyền truy cập dữ liệu (Data Access) |
-| :--- | :--- | :--- | :--- |
-| **Coordinator Agent** | Tiếp nhận case khiếu nại từ `input/`, phân trích `claimed_order_id` và điều phối luồng xử lý. | Read / Write | `input/*.json`, `trace.jsonl` |
-| **Order & Seller Agent** | Truy xuất đơn hàng, danh sách items, xác định người bán (`seller_id`) và kiểm tra hạn bàn giao (`shipping_limit_date`). | Read-only | `data/olist_orders_dataset.csv`<br>`data/olist_order_items_dataset.csv`<br>`data/olist_sellers_dataset.csv` |
-| **Payment Agent** | Trích xuất các giao dịch thanh toán, kiểm tra giao dịch tách dòng (`split payment`) và đối soát tổng tiền. | Read-only | `data/olist_order_payments_dataset.csv` |
-| **Delivery Agent** | So sánh thời gian giao thực tế (`order_delivered_customer_date`) và ngày hẹn giao (`order_estimated_delivery_date`). | Read-only | `data/olist_orders_dataset.csv` |
-| **Policy Agent** | Nhận dữ liệu tổng hợp, áp dụng quy tắc ưu tiên `EC_POLICY_V1` để đưa ra kết luận, bên chịu trách nhiệm và khoản hoàn trả. | Read-only | In-memory payload từ các domain agents |
-| **Verifier Agent** | Thẩm định định dạng Evidence ID, áp giới hạn số lượng phần tử, kiểm tra định dạng JSON và ghi file kết quả. | Read / Write | `output/*.json`, `trace.jsonl` |
+### 3. OrderSellerAgent
+- **Vai trò**: Truy vấn thông tin đơn hàng, item, seller
+- **Quyền truy cập**: `orders`, `order_items`, `sellers` tables
+- **Input**: `order_id`
+- **Output**:
+  - `order_status`, timestamps
+  - Danh sách `items` (price, freight, shipping_limit_date)
+  - `seller_ids`, `item_total_brl`, `freight_total_brl`
+  - `late_seller_handoff` (bool): carrier nhận hàng sau `shipping_limit_date`
+  - `late_seller_ids`: danh sách seller vi phạm hạn bàn giao
 
----
+### 4. PaymentAgent
+- **Vai trò**: Phân tích thanh toán, đối soát với giá trị đơn hàng
+- **Quyền truy cập**: `order_payments` table
+- **Input**: `order_id`, `item_total_brl`, `freight_total_brl`
+- **Output**:
+  - Danh sách `payments`, `payment_total_brl`
+  - `is_split_payment` (bool): có ≥ 2 payment rows
+  - `payment_matches_order` (bool): tổng payment khớp item+freight trong ±0.10 BRL
 
-## 3. Luồng Chuyển Giao Công Việc (Handoff Workflow)
+### 5. DeliveryAgent
+- **Vai trò**: Phân tích timing giao hàng
+- **Quyền truy cập**: Dữ liệu từ `OrderSellerAgent` (không query CSV trực tiếp)
+- **Input**: `order_data` từ OrderSellerAgent
+- **Output**:
+  - `late_delivery_to_customer` (bool): giao sau `order_estimated_delivery_date`
+  - `delivered_to_customer` (bool)
+  - Các timestamp để trace
 
-1. **Khởi tạo (Initialization Phase)**:
-   * **Coordinator Agent** đọc file input `input/EC_xxx.json`, lấy `claimed_order_id` và kích hoạt luồng xử lý đồng thời khởi tạo nhật ký vết tại `trace.jsonl`.
+### 6. PolicyAgent
+- **Vai trò**: Áp dụng EC_POLICY_V1, quyết định kết quả
+- **Quyền truy cập**: Chỉ nhận output từ 3 agents trước (không query CSV)
+- **Input**: `order_data`, `payment_data`, `delivery_data`
+- **Luồng quyết định** (theo thứ tự ưu tiên):
+  1. `canceled_order_paid` → hoàn toàn bộ payment
+  2. `unavailable_order_paid` → hoàn toàn bộ payment
+  3. `late_delivery_seller` → hoàn freight (seller bàn giao muộn)
+  4. `late_delivery_logistics` → hoàn freight (vận chuyển giao muộn)
+  5. `valid_split_payment` → không hoàn, giải thích
+  6. `unsupported_late_claim` → từ chối claim
+- **Output**: `primary_issue`, `responsible_parties`, `recommended_refund_brl`, `resolution_actions`
 
-2. **Thu thập dữ liệu chuyên miền (Domain Data Extraction Phase)**:
-   * **Order & Seller Agent** lấy thông tin trạng thái đơn, danh sách mặt hàng, tính `item_total` và `freight_total`. So sánh `order_delivered_carrier_date` với `shipping_limit_date` của từng item để phát hiện seller vi phạm.
-   * **Payment Agent** gom tất cả dòng payment của order, tính `payment_total` và xác định trạng thái thanh toán nhiều dòng (split payment).
-   * **Delivery Agent** xác định đơn hàng có bị giao trễ hay không bằng việc đối sánh `order_delivered_customer_date` > `order_estimated_delivery_date`.
+### 7. VerifierAgent
+- **Vai trò**: Kiểm tra và fix output trước khi ghi file
+- **Quyền truy cập**: Output JSON từ bước assembly
+- **Kiểm tra**:
+  - Schema compliance (primary_issue, case_status valid values)
+  - Evidence ID format (regex validation)
+  - Array limits: max 5 entity IDs, max 10 evidence IDs, max 3 root causes, max 3 responsible parties, max 5 actions
+  - Clamp confidence trong [0, 1]
+  - Round số tiền về 2 chữ số thập phân
 
-3. **Ra quyết định nghiệp vụ (Policy Evaluation Phase)**:
-   * Các Domain Agents thực hiện handoff toàn bộ bằng chứng số liệu sang **Policy Agent**.
-   * **Policy Agent** đánh giá các điều kiện theo **thứ tự ưu tiên nghiêm ngặt** của `EC_POLICY_V1`:
-     1. `canceled_order_paid`
-     2. `unavailable_order_paid`
-     3. `late_delivery_seller`
-     4. `late_delivery_logistics`
-     5. `valid_split_payment`
-     6. `unsupported_late_claim`
+## Luồng Handoff
 
-4. **Kiểm tra & Xuất kết quả (Validation & Export Phase)**:
-   * **Policy Agent** bàn giao bản thảo quyết định cho **Verifier Agent**.
-   * **Verifier Agent** thực hiện các bước kiểm duyệt cuối:
-     * Dựng danh sách **Evidence ID** chính xác theo chuẩn (`order:<id>`, `item:<id>:<seq>`, `payment:<id>:<seq>`, `seller:<id>`, `policy:<code>`).
-     * Áp giới hạn kỹ thuật: Tối đa 5 IDs cho mỗi entity list, tối đa 10 evidence IDs, 3 root causes, 3 responsible parties và 5 actions.
-     * Làm tròn tiền tệ 2 chữ số thập phân (`BRL`).
-     * Ghi file `output/EC_xxx.json` và append log bước chạy vào `trace.jsonl`.
+```
+CoordinatorAgent
+    │
+    ├─► OrderSellerAgent(order_id)
+    │       └─► order_data {status, items, freight_total, late_seller_handoff, ...}
+    │
+    ├─► PaymentAgent(order_id, item_total, freight_total)
+    │       └─► payment_data {payment_total, is_split_payment, payment_matches, ...}
+    │
+    ├─► DeliveryAgent(order_data)
+    │       └─► delivery_data {late_delivery_to_customer, ...}
+    │
+    ├─► PolicyAgent(order_data, payment_data, delivery_data)
+    │       └─► policy_data {primary_issue, refund, actions, ...}
+    │
+    ├─► [assemble output JSON]
+    │
+    └─► VerifierAgent(output)
+            └─► validated_output → ghi file
+```
+
+## Quyền truy cập dữ liệu
+
+| Agent | orders | order_items | order_payments | sellers | Agents khác |
+|-------|--------|-------------|----------------|---------|-------------|
+| DataLoader | ✓ | ✓ | ✓ | ✓ | - |
+| OrderSellerAgent | ✓ | ✓ | - | ✓ | DataLoader |
+| PaymentAgent | - | - | ✓ | - | DataLoader |
+| DeliveryAgent | - | - | - | - | order_data |
+| PolicyAgent | - | - | - | - | 3 agent outputs |
+| VerifierAgent | - | - | - | - | assembled output |
+
+## Output
+
+- **`output/EC_XXX.json`**: Kết quả xử lý từng case theo schema bắt buộc
+- **`trace.jsonl`**: Log trace từng bước xử lý của 50 case (1 dòng JSON/case)
