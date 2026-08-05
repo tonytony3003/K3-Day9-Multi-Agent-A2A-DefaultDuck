@@ -1,0 +1,42 @@
+{
+  "project": "K3 Day 09 Multi-Agent E-commerce Dispute Resolution",
+  "run_id": "run_2c48467684694bafb3560832fc688351",
+  "model": "openai/gpt-4o-mini",
+  "model_provider": "OpenRouter",
+  "parameter_size": "approved for this assignment",
+  "framework": "LangGraph 1.0.10",
+  "structured_output": "OpenRouter JSON Schema strict mode",
+  "execution_mode": "deterministic",
+  "runtime": {
+    "language": "Python",
+    "python_version": "3.12.10",
+    "execution": "single process with parallel specialist graph branches"
+  },
+  "policy_version": "EC_POLICY_V1",
+  "agent_count": 6,
+  "agents": [
+    "coordinator",
+    "order_seller_agent",
+    "payment_agent",
+    "delivery_agent",
+    "policy_agent",
+    "verifier_agent"
+  ],
+  "data_snapshot": "Olist CSVs provided in repository",
+  "audit": {
+    "passed": true,
+    "errors": [],
+    "input_count": 50,
+    "output_count": 50,
+    "issue_distribution": {
+      "canceled_order_paid": 8,
+      "late_delivery_logistics": 8,
+      "late_delivery_seller": 8,
+      "unavailable_order_paid": 8,
+      "unsupported_late_claim": 9,
+      "valid_split_payment": 9
+    },
+    "total_refund_brl": "3429.64"
+  },
+  "generated_at": "2026-08-05T11:43:24+07:00"
+}
