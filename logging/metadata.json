@@ -1,0 +1,42 @@
+{
+  "model": "llama-3.1-8b-instant",
+  "model_parameter_size": "8B",
+  "framework": "python-stdlib + groq-rest-api",
+  "runtime": {
+    "python_version": "3.13.5",
+    "os": "win32",
+    "data_load_time_seconds": 1.01,
+    "processing_time_seconds": 1663.33,
+    "total_llm_calls": 71,
+    "total_tokens_used": 89047
+  },
+  "agents": [
+    {
+      "name": "CoordinatorAgent",
+      "role": "Orchestration and case dispatch"
+    },
+    {
+      "name": "OrderAgent",
+      "role": "Order data retrieval + LLM analysis"
+    },
+    {
+      "name": "DeliveryAgent",
+      "role": "LLM-powered delivery timeliness analysis"
+    },
+    {
+      "name": "PaymentAgent",
+      "role": "Payment data retrieval + LLM reconciliation"
+    },
+    {
+      "name": "PolicyAgent",
+      "role": "LLM-powered EC_POLICY_V1 rule application"
+    },
+    {
+      "name": "VerifierAgent",
+      "role": "LLM-powered schema validation + output writing"
+    }
+  ],
+  "policy_version": "EC_POLICY_V1",
+  "api_provider": "Groq",
+  "generated_at": "2026-08-05T05:06:36.827262+00:00"
+}
